@@ -1,0 +1,192 @@
+From b23d0d4851a8418391ab87d85c31080ffd4b80ed Mon Sep 17 00:00:00 2001
+From: Junjie Mao <eternal.n08@gmail.com>
+Date: Mon, 14 Apr 2014 10:11:55 +0800
+Subject: [PATCH] Mark symbols as referenced when they are looked up
+
+Signed-off-by: Junjie Mao <eternal.n08@gmail.com>
+---
+ lib/Sema/SemaLookup.cpp | 50 +++++++++++++++++++++++++++----------------------
+ 1 file changed, 28 insertions(+), 22 deletions(-)
+
+diff --git a/lib/Sema/SemaLookup.cpp b/lib/Sema/SemaLookup.cpp
+index 9ab3b2d..8a332f5 100644
+--- a/lib/Sema/SemaLookup.cpp
++++ b/lib/Sema/SemaLookup.cpp
+@@ -250,7 +250,7 @@ static inline unsigned getIDNS(Sema::LookupNameKind NameKind,
+   case Sema::LookupLabel:
+     IDNS = Decl::IDNS_Label;
+     break;
+-      
++
+   case Sema::LookupMemberName:
+     IDNS = Decl::IDNS_Member;
+     if (CPlusPlus)
+@@ -1019,7 +1019,7 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
+     UDirs.visitScopeChain(Initial, S);
+     UDirs.done();
+   }
+-  
++
+   // Lookup namespace scope, and global scope.
+   // Unqualified name lookup in C++ requires looking into scopes
+   // that aren't strictly lexical, and therefore we walk through the
+@@ -1103,13 +1103,13 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
+ /// This routine determines whether the declaration D is visible in the current
+ /// module, with the current imports. If not, it checks whether any
+ /// redeclaration of D is visible, and if so, returns that declaration.
+-/// 
++///
+ /// \returns D, or a visible previous declaration of D, whichever is more recent
+ /// and visible. If no declaration of D is visible, returns null.
+ static NamedDecl *getVisibleDecl(NamedDecl *D) {
+   if (LookupResult::isVisible(D))
+     return D;
+-  
++
+   for (Decl::redecl_iterator RD = D->redecls_begin(), RDEnd = D->redecls_end();
+        RD != RDEnd; ++RD) {
+     if (NamedDecl *ND = dyn_cast<NamedDecl>(*RD)) {
+@@ -1117,7 +1117,7 @@ static NamedDecl *getVisibleDecl(NamedDecl *D) {
+         return ND;
+     }
+   }
+-  
++
+   return 0;
+ }
+ 
+@@ -1193,14 +1193,18 @@ bool Sema::LookupName(LookupResult &R, Scope *S, bool AllowBuiltinCreation) {
+         else if (NameKind == LookupObjCImplicitSelfParam &&
+                  !isa<ImplicitParamDecl>(*I))
+           continue;
+-        
++
+         // If this declaration is module-private and it came from an AST
+         // file, we can't see it.
+         NamedDecl *D = R.isHiddenDeclarationVisible()? *I : getVisibleDecl(*I);
+         if (!D)
+           continue;
+-                
++
+         R.addDecl(D);
++        SourceManager &SM = R.getSema().getSourceManager();
++        StringRef file = SM.getFilename(R.getNameLoc());
++        if (file.endswith("*.h"))
++                D->setReferenced();
+ 
+         // Check whether there are any other declarations with the same name
+         // and in the same scope.
+@@ -1209,7 +1213,7 @@ bool Sema::LookupName(LookupResult &R, Scope *S, bool AllowBuiltinCreation) {
+           // actually exists in a Scope).
+           while (S && !S->isDeclScope(D))
+             S = S->getParent();
+-          
++
+           // If the scope containing the declaration is the translation unit,
+           // then we'll need to perform our checks based on the matching
+           // DeclContexts rather than matching scopes.
+@@ -1220,7 +1224,7 @@ bool Sema::LookupName(LookupResult &R, Scope *S, bool AllowBuiltinCreation) {
+           DeclContext *DC = 0;
+           if (!S)
+             DC = (*I)->getDeclContext()->getRedeclContext();
+-            
++
+           IdentifierResolver::iterator LastI = I;
+           for (++LastI; LastI != IEnd; ++LastI) {
+             if (S) {
+@@ -1229,19 +1233,21 @@ bool Sema::LookupName(LookupResult &R, Scope *S, bool AllowBuiltinCreation) {
+                 break;
+             } else {
+               // Match based on DeclContext.
+-              DeclContext *LastDC 
++              DeclContext *LastDC
+                 = (*LastI)->getDeclContext()->getRedeclContext();
+               if (!LastDC->Equals(DC))
+                 break;
+             }
+-            
++
+             // If the declaration isn't in the right namespace, skip it.
+             if (!(*LastI)->isInIdentifierNamespace(IDNS))
+               continue;
+-                        
++
+             D = R.isHiddenDeclarationVisible()? *LastI : getVisibleDecl(*LastI);
+-            if (D)
++            if (D) {
+               R.addDecl(D);
++              D->setReferenced();
++            }
+           }
+ 
+           R.resolveKind();
+@@ -1260,8 +1266,8 @@ bool Sema::LookupName(LookupResult &R, Scope *S, bool AllowBuiltinCreation) {
+   if (AllowBuiltinCreation && LookupBuiltin(*this, R))
+     return true;
+ 
+-  // If we didn't find a use of this identifier, the ExternalSource 
+-  // may be able to handle the situation. 
++  // If we didn't find a use of this identifier, the ExternalSource
++  // may be able to handle the situation.
+   // Note: some lookup failures are expected!
+   // See e.g. R.isForRedeclaration().
+   return (ExternalSource && ExternalSource->LookupUnqualified(R, S));
+@@ -2091,7 +2097,7 @@ addAssociatedClassesAndNamespaces(AssociatedLookup &Result, QualType Ty) {
+     case Type::Auto:
+       break;
+ 
+-    // If T is an Objective-C object or interface type, or a pointer to an 
++    // If T is an Objective-C object or interface type, or a pointer to an
+     // object or interface type, the associated namespace is the global
+     // namespace.
+     case Type::ObjCObject:
+@@ -3069,7 +3075,7 @@ static void LookupVisibleDecls(Scope *S, LookupResult &Result,
+                                   Result.getNameLoc(), Sema::LookupMemberName);
+           if (ObjCInterfaceDecl *IFace = Method->getClassInterface()) {
+             LookupVisibleDecls(IFace, IvarResult, /*QualifiedNameLookup=*/false,
+-                               /*InBaseClass=*/false, Consumer, Visited);              
++                               /*InBaseClass=*/false, Consumer, Visited);
+           }
+         }
+ 
+@@ -3595,7 +3601,7 @@ static void AddKeywordsToConsumer(Sema &SemaRef,
+     // Add type-specifier keywords to the set of results.
+     const char *CTypeSpecs[] = {
+       "char", "const", "double", "enum", "float", "int", "long", "short",
+-      "signed", "struct", "union", "unsigned", "void", "volatile", 
++      "signed", "struct", "union", "unsigned", "void", "volatile",
+       "_Complex", "_Imaginary",
+       // storage-specifiers as well
+       "extern", "inline", "static", "typedef"
+@@ -3611,7 +3617,7 @@ static void AddKeywordsToConsumer(Sema &SemaRef,
+       Consumer.addKeywordResult("bool");
+     else if (SemaRef.getLangOpts().C99)
+       Consumer.addKeywordResult("_Bool");
+-    
++
+     if (SemaRef.getLangOpts().CPlusPlus) {
+       Consumer.addKeywordResult("class");
+       Consumer.addKeywordResult("typename");
+@@ -3862,7 +3868,7 @@ TypoCorrection Sema::CorrectTypo(const DeclarationNameInfo &TypoName,
+   // In a few cases we *only* want to search for corrections bases on just
+   // adding or changing the nested name specifier.
+   bool AllowOnlyNNSChanges = Typo->getName().size() < 3;
+-  
++
+   if (IsUnqualifiedLookup || SearchNamespaces) {
+     // For unqualified lookup, look through all of the names that we have
+     // seen in this translation unit.
+@@ -3920,8 +3926,8 @@ TypoCorrection Sema::CorrectTypo(const DeclarationNameInfo &TypoName,
+       for (unsigned I = 0, N = ExternalKnownNamespaces.size(); I != N; ++I)
+         KnownNamespaces[ExternalKnownNamespaces[I]] = true;
+     }
+-    
+-    for (llvm::MapVector<NamespaceDecl*, bool>::iterator 
++
++    for (llvm::MapVector<NamespaceDecl*, bool>::iterator
+            KNI = KnownNamespaces.begin(),
+            KNIEnd = KnownNamespaces.end();
+          KNI != KNIEnd; ++KNI)
+-- 
+1.8.5.3
+

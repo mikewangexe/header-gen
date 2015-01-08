@@ -1,0 +1,27 @@
+Clang plugins for collecting declaration information from C headers
+
+Depedencies
+===========
+
+LLVM/Clang 3.3 (built from source)
+CMake 2.8
+sqlite3
+sqlite3-devel
+
+Build Howto
+===========
+
+1. Change LLVM_SRC_DIR, CLANG_SRC_DIR, LLVM_BUILD_DIR and CLANG_BUILD_DIR to
+   your local path to LLVM source/build directories.
+
+2. Execute:
+    [xx@xx clang-plugins]$ mkdir build
+    [xx@xx clang-plugins]$ cd build
+    [xx@xx build]$ cmake ..
+    [xx@xx build]$ make
+
+Install Howto
+=============
+
+1. Execute:
+    [xx@xx build]$ cp lib/*.so ../..
